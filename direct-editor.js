@@ -16,8 +16,7 @@
     el.addEventListener('blur', () => {
       const input = typeof target === 'function' ? target() : target;
       if (!input) return;
-      const value = escText(el);
-      input.value = value;
+      input.value = escText(el);
       input.dispatchEvent(new Event('input', {bubbles:true}));
     });
   };
@@ -25,13 +24,10 @@
     if (!document.querySelector('.editor-layout')) return;
     const canvas = document.querySelector('.editor-layout .presentation-canvas');
     if (!canvas) return;
-
     const title = canvas.querySelector('.canvas-title');
     if (title && !title.closest('.fake-board')) mark(title, ()=>document.querySelector('#slide-title'));
-
     const body = canvas.querySelector('.canvas-body');
     if (body && !body.querySelector('.canvas-option')) mark(body, ()=>document.querySelector('#slide-body') || document.querySelector('#slide-title'));
-
     canvas.querySelectorAll('.canvas-option').forEach((option, i) => {
       if (option.dataset.pulseOptionWired === '1') return;
       option.dataset.pulseOptionWired = '1';
@@ -48,12 +44,5 @@
   }
   const observer = new MutationObserver(() => requestAnimationFrame(wire));
   observer.observe(document.body,{childList:true,subtree:true});
-  document.addEventListener('click', e => {
-    const editable = e.target.closest('.editor-layout .presentation-canvas [contenteditable="true"]');
-    if (!editable) return;
-    requestAnimationFrame(() => {
-      try { document.execCommand('selectAll', false, null); } catch(_) {}
-    });
-  });
   setTimeout(wire,300);
 })();
