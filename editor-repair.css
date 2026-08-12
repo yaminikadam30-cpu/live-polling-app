@@ -29,3 +29,108 @@
   outline-color: #635bff;
   background: #faf9ff;
 }
+
+/* Live quiz safety/UI layer. */
+.host-timer,
+.participant-timer {
+  position: relative !important;
+  z-index: 5 !important;
+  min-width: 110px !important;
+  min-height: 70px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  padding: 8px 24px !important;
+  margin: 18px auto !important;
+  border-radius: 999px !important;
+  font-size: 42px !important;
+  font-weight: 800 !important;
+  line-height: 1 !important;
+}
+
+.timer-critical {
+  animation: pulseTimer 700ms ease-in-out infinite alternate;
+}
+
+@keyframes pulseTimer {
+  from { transform: scale(1); }
+  to { transform: scale(1.06); }
+}
+
+.pulse-live-board {
+  width: min(760px, 94%);
+  margin: 28px auto 0;
+  padding: 18px 22px;
+  border: 1px solid rgba(255,255,255,.16);
+  border-radius: 18px;
+  background: rgba(255,255,255,.06);
+  box-sizing: border-box;
+}
+
+.pulse-board-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+  font-weight: 800;
+  font-size: 18px;
+}
+
+.pulse-board-heading small {
+  opacity: .65;
+  letter-spacing: .12em;
+  font-size: 11px;
+}
+
+.pulse-board-rows {
+  display: grid;
+  gap: 6px;
+}
+
+.pulse-board-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 11px;
+  border-radius: 10px;
+  background: rgba(255,255,255,.055);
+  font-size: 15px;
+}
+
+.pulse-board-row strong {
+  font-variant-numeric: tabular-nums;
+}
+
+.pulse-board-empty {
+  opacity: .7;
+  padding: 12px 0 2px;
+  text-align: center;
+}
+
+.pulse-dedicated-board {
+  width: min(900px, 94vw);
+  margin: 0 auto;
+}
+
+.pulse-dedicated-board h1 {
+  margin-bottom: 22px;
+}
+
+@media (max-width: 700px) {
+  .host-timer,
+  .participant-timer {
+    min-width: 82px !important;
+    min-height: 56px !important;
+    font-size: 32px !important;
+  }
+  .pulse-live-board {
+    margin-top: 18px;
+    padding: 14px;
+  }
+  .pulse-board-row {
+    padding: 8px 9px;
+    font-size: 14px;
+  }
+}
