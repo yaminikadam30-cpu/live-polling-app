@@ -1,0 +1,4 @@
+document.addEventListener('click',e=>{const item=e.target.closest('[data-slide-index]');if(!item||!window.state)return;if(e.defaultPrevented)return;e.preventDefault();window.state.slideIndex=Number(item.dataset.slideIndex);window.renderEditor?.()});
+document.addEventListener('dragstart',e=>{const item=e.target.closest('[data-slide-index]');if(item){e.stopPropagation();e.dataTransfer.effectAllowed='move'}});
+document.addEventListener('dragover',e=>{const item=e.target.closest('[data-slide-index]');if(item)e.preventDefault()});
+document.addEventListener('drop',e=>{const item=e.target.closest('[data-slide-index]');if(item)e.stopPropagation()});
