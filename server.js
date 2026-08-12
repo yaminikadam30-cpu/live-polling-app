@@ -2,13 +2,24 @@ import express from 'express';
 import { createServer } from 'node:http';
 import { Server } from 'socket.io';
 import crypto from 'node:crypto';
-const app=express();const server=createServer(app);const io=new Server(server);const sessions=new Map();const DEFAULT_DURATION=30;
-app.use(express.json({limit:'4mb'}));app.use(express.static('.'));
-const TYPES=['quiz','truefalse','poll','wordcloud','ranking','content','leaderboard'];const ANSWER_TYPES=['quiz','truefalse','poll','wordcloud','ranking'];
-const cleanText=(v,max=500)=>String(v??'').trim().slice(0,max);const code=()=>{let v;do v=String(Math.floor(100000+Math.random()*900000));while(sessions.has(v));return v};
+
+const app=express();
+const server=createServer(app);
+const io=new Server(server);
+const sessions=new Map();
+const DEFAULT_DURATION=30;
+
+app.use(express.json({limit:'4mb'}));
+app.use(express.static('.'));
+
+const TYPES=['quiz','truefalse','poll','wordcloud','ranking','content','leaderboard'];
+const ANSWER_TYPES=['quiz','truefalse','poll','wordcloud','ranking'];
+const cleanText=(v,max=500)=>String(v??'').trim().slice(0,max);
+const code=()=>{let v;do v=String(Math.floor(100000+Math.random()*900000));while(sessions.has(v));return v};
 const publicSession=s=>({code:s.code,title:s.title,status:s.status,slideIndex:s.slideIndex,slideCount:s.slides.length,participants:s.participants.size,participantNames:[...s.participants.values()].map(p=>p.name)});
-const activeSlide=s=>s.slides[s.slideIndex]??null;const sortedParticipants=s=>[...s.participants.values()].sort((a,b)=>b.score-a.score||a.joinedAt-b.joinedAt||a.name.localeCompare(b.name));
-const board=(s,pid=null)=>{const list=sortedParticipants(s),i=pid?list.findIndex(p=>p.id===pid):-1;return{top:list.slice(0,10).map((p,n)=>({id:p.id,name:p.name,score:p.score,rank:n+1})),totalParticipants:list.length,participantRank:i>=0?i+1:null,participantScore:i>=0?list[i].score:null}};
+const activeSlide=s=>s.slides[s.slideIndex]??null;
+const sortedParticipants=s=>[...s.participants.values()].sort((a,b)=>b.score-a.score||a.joinedAt-b.joinedAt||a.name.localeCompare(b.name));
+const board=(s,pid=null)=>{const list=sortedParticipants(s),i=pid?list.findIndex(p=>p.id===pid):-1;return{top:list.slice(0,10).map((p,n)=>({id:p.id,name:p.name,score:p.score,rank:n+1,employeeCode:p.employeeCode})),totalParticipants:list.length,participantRank:i>=0?i+1:null,participantScore:i>=0?list[i].score:null}};
 const participantReview=(s,pid)=>s.history.filter(x=>x.participantId===pid).map(x=>({slideIndex:x.slideIndex,title:x.title,type:x.type,options:x.options,selectedOptionId:x.selectedOptionId,correctOptionId:x.correctOptionId,isCorrect:x.isCorrect,earnedPoints:x.earnedPoints}));
 const slidePayload=s=>{const slide=activeSlide(s);if(!slide)return null;const p={...slide,index:s.slideIndex,status:s.status,startedAt:s.slideStartedAt};if(ANSWER_TYPES.includes(slide.type)){p.totalAnswers=s.answers.size;p.options=(slide.options||[]).map(o=>({id:o.id,text:o.text,image:o.image||null}))}if(slide.type==='leaderboard')p.leaderboard=board(s);return p};
 const clearTimer=s=>{if(s.timer)clearTimeout(s.timer);s.timer=null};
@@ -16,17 +27,67 @@ const scoreFor=(s,at)=>{const q=activeSlide(s);if(!q?.correctOptionId)return 0;i
 const emitStats=s=>io.to(`session:${s.code}`).emit('session:stats',publicSession(s));
 const openSlide=s=>{clearTimer(s);s.status='slide';s.answers.clear();s.slideStartedAt=Date.now();const slide=activeSlide(s);io.to(`session:${s.code}`).emit('slide:open',slidePayload(s));emitStats(s);if(ANSWER_TYPES.includes(slide?.type)&&slide.duration>0)s.timer=setTimeout(()=>closeSlide(s),slide.duration*1000)};
 const closeSlide=s=>{if(!s||s.status!=='slide')return;clearTimer(s);s.status='results';const slide=activeSlide(s);const counts={};for(const o of slide.options||[])counts[o.id]=0;for(const a of s.answers.values())counts[a.optionId]=(counts[a.optionId]||0)+1;for(const p of s.participants.values()){if(!s.history.some(h=>h.participantId===p.id&&h.slideIndex===s.slideIndex)){const a=s.answers.get(p.id);s.history.push({participantId:p.id,slideIndex:s.slideIndex,title:slide.title,type:slide.type,options:slide.options||[],selectedOptionId:a?.optionId??null,correctOptionId:slide.correctOptionId??null,isCorrect:a?.isCorrect??false,earnedPoints:a?.earnedPoints??0})}}io.to(`session:${s.code}`).emit('slide:results',{slide:slidePayload(s),counts,correctOptionId:slide.correctOptionId??null,leaderboard:board(s),earned:Object.fromEntries(s.answers.entries())});emitStats(s)};
-app.post('/api/sessions',(req,res)=>{const title=cleanText(req.body.title,100)||'My presentation';const slides=Array.isArray(req.body.slides)?req.body.slides.map(raw=>{const type=TYPES.includes(raw.type)?raw.type:'content';const rawDuration=Number(raw.duration);const slide={id:raw.id||crypto.randomUUID(),type,title:cleanText(raw.title,300),body:cleanText(raw.body,3000),image:cleanText(raw.image,250000),font:cleanText(raw.font,60)||'Inter',fontSize:Number(raw.fontSize)||44,duration:Math.max(0,Math.min(600,rawDuration===0?0:rawDuration||DEFAULT_DURATION)),options:Array.isArray(raw.options)?raw.options.slice(0,10).map((o,i)=>({id:String(i),text:cleanText(o.text,180),image:cleanText(o.image,250000)})).filter(o=>o.text):[]};if(type==='truefalse'&&slide.options.length===0)slide.options=[{id:'0',text:'True',image:''},{id:'1',text:'False',image:''}];if(type==='quiz'||type==='truefalse'){const correct=Number(raw.correctOptionIndex);slide.correctOptionId=Number.isInteger(correct)&&correct>=0&&correct<slide.options.length?String(correct):null}return slide}):[];if(!slides.length)return res.status(400).json({error:'Add at least one slide.'});const hostToken=crypto.randomBytes(24).toString('hex');const s={code:code(),title,slides,status:'lobby',slideIndex:0,participants:new Map(),answers:new Map(),history:[],timer:null,slideStartedAt:null,hostToken,createdAt:Date.now()};sessions.set(s.code,s);const base=`${req.protocol}://${req.get('host')}`;res.status(201).json({...publicSession(s),hostToken,participantUrl:`${base}/?join=${s.code}`,hostUrl:`${base}/?host=${s.code}&token=${hostToken}`})});
-app.get('/api/sessions/:code',(req,res)=>{const s=sessions.get(req.params.code);if(!s)return res.status(404).json({error:'Session not found.'});res.json(publicSession(s))});
-io.on('connection',socket=>{
- socket.on('host:join',({code:sessionCode,token},reply)=>{const s=sessions.get(sessionCode);if(!s||token!==s.hostToken)return reply?.({error:'Host access denied.'});socket.join(`session:${s.code}`);socket.data.hostSession=s.code;socket.data.host=true;reply?.({session:publicSession(s),slide:s.status==='lobby'?null:slidePayload(s),leaderboard:board(s)})});
- socket.on('participant:join',({code:sessionCode,name},reply)=>{const s=sessions.get(sessionCode),displayName=cleanText(name,32);if(!s)return reply?.({error:'That code does not exist or the session has ended.'});if(!displayName)return reply?.({error:'Enter your name to join.'});const p={id:crypto.randomUUID(),name:displayName,score:0,joinedAt:Date.now(),connected:true};s.participants.set(p.id,p);socket.join(`session:${s.code}`);socket.data.sessionCode=s.code;socket.data.participantId=p.id;emitStats(s);reply?.({participant:p,session:publicSession(s),slide:s.status==='lobby'?null:slidePayload(s),leaderboard:board(s,p.id)});io.to(`session:${s.code}`).emit('lobby:update',publicSession(s))});
- socket.on('participant:observe',({code:sessionCode},reply)=>{const s=sessions.get(sessionCode);if(!s)return reply?.({error:'Session not found.'});socket.join(`session:${s.code}`);socket.data.sessionCode=s.code;socket.data.observer=true;reply?.({session:publicSession(s),slide:s.status==='lobby'?null:slidePayload(s),leaderboard:board(s)})});
- socket.on('participant:rejoin',({code:sessionCode,participantId},reply)=>{const s=sessions.get(sessionCode),p=s?.participants.get(participantId);if(!s||!p)return reply?.({error:'Participant session not found.'});p.connected=true;socket.join(`session:${s.code}`);socket.data.sessionCode=s.code;socket.data.participantId=p.id;reply?.({participant:p,session:publicSession(s),slide:s.status==='lobby'?null:slidePayload(s),leaderboard:board(s,p.id),review:participantReview(s,p.id)})});
- socket.on('host:start',reply=>{const s=sessions.get(socket.data.hostSession);if(!s||!socket.data.host)return;openSlide(s);reply?.({ok:true})});
- socket.on('host:close',reply=>{const s=sessions.get(socket.data.hostSession);if(!s||!socket.data.host||s.status!=='slide')return;closeSlide(s);reply?.({ok:true})});
- socket.on('host:next',reply=>{const s=sessions.get(socket.data.hostSession);if(!s||!socket.data.host)return;if(s.status==='slide')return;if(s.slideIndex+1>=s.slides.length){clearTimer(s);s.status='complete';io.to(`session:${s.code}`).emit('session:complete',{leaderboard:board(s),reviewers:[...s.participants.values()].map(p=>({id:p.id,name:p.name,score:p.score,review:participantReview(s,p.id)}))});emitStats(s)}else{s.slideIndex++;openSlide(s)}reply?.({ok:true})});
- socket.on('participant:answer',({optionId},reply)=>{const s=sessions.get(socket.data.sessionCode),p=s?.participants.get(socket.data.participantId),slide=s&&activeSlide(s);if(!s||!p||s.status!=='slide'||!slide||!ANSWER_TYPES.includes(slide.type))return reply?.({error:'Responses are not open.'});if(s.answers.has(p.id)||!(slide.options||[]).some(o=>o.id===String(optionId)))return reply?.({error:'Answer already recorded.'});const now=Date.now();if(slide.duration>0&&now>s.slideStartedAt+slide.duration*1000)return reply?.({error:'Time is up.'});const correct=(slide.type==='quiz'||slide.type==='truefalse')&&slide.correctOptionId===String(optionId);const earned=correct?scoreFor(s,now):0;if(correct)p.score+=earned;s.answers.set(p.id,{optionId:String(optionId),at:now,isCorrect:correct,earnedPoints:earned});s.history.push({participantId:p.id,slideIndex:s.slideIndex,title:slide.title,type:slide.type,options:slide.options||[],selectedOptionId:String(optionId),correctOptionId:slide.correctOptionId??null,isCorrect:correct,earnedPoints:earned});io.to(`session:${s.code}`).emit('slide:progress',{totalAnswers:s.answers.size});reply?.({ok:true,isCorrect:correct,earnedPoints:earned,score:p.score,correctOptionId:slide.correctOptionId??null,review:participantReview(s,p.id)})});
- socket.on('disconnect',()=>{const s=sessions.get(socket.data.sessionCode),p=s?.participants.get(socket.data.participantId);if(s&&p){p.connected=false;emitStats(s)}})
+
+app.post('/api/sessions',(req,res)=>{
+  const title=cleanText(req.body.title,100)||'My presentation';
+  const slides=Array.isArray(req.body.slides)?req.body.slides.map(raw=>{
+    const type=TYPES.includes(raw.type)?raw.type:'content';
+    const rawDuration=Number(raw.duration);
+    const slide={id:raw.id||crypto.randomUUID(),type,title:cleanText(raw.title,300),body:cleanText(raw.body,3000),image:cleanText(raw.image,250000),font:cleanText(raw.font,60)||'Inter',fontSize:Number(raw.fontSize)||44,duration:Math.max(0,Math.min(600,rawDuration===0?0:rawDuration||DEFAULT_DURATION)),options:Array.isArray(raw.options)?raw.options.slice(0,10).map((o,i)=>({id:String(i),text:cleanText(o.text,180),image:cleanText(o.image,250000)})).filter(o=>o.text):[]};
+    if(type==='truefalse'&&slide.options.length===0)slide.options=[{id:'0',text:'True',image:''},{id:'1',text:'False',image:''}];
+    if(type==='quiz'||type==='truefalse'){const correct=Number(raw.correctOptionIndex);slide.correctOptionId=Number.isInteger(correct)&&correct>=0&&correct<slide.options.length?String(correct):null}
+    return slide;
+  }):[];
+  if(!slides.length)return res.status(400).json({error:'Add at least one slide.'});
+  const hostToken=crypto.randomBytes(24).toString('hex');
+  const s={code:code(),title,slides,status:'lobby',slideIndex:0,participants:new Map(),answers:new Map(),history:[],timer:null,slideStartedAt:null,hostToken,createdAt:Date.now()};
+  sessions.set(s.code,s);
+  const base=`${req.protocol}://${req.get('host')}`;
+  res.status(201).json({...publicSession(s),hostToken,participantUrl:`${base}/?join=${s.code}`,hostUrl:`${base}/?host=${s.code}&token=${hostToken}`});
 });
+
+app.get('/api/sessions/:code',(req,res)=>{const s=sessions.get(req.params.code);if(!s)return res.status(404).json({error:'Session not found.'});res.json(publicSession(s))});
+
+aio.on('connection',socket=>{
+  socket.on('host:join',({code:sessionCode,token},reply)=>{const s=sessions.get(sessionCode);if(!s||token!==s.hostToken)return reply?.({error:'Host access denied.'});socket.join(`session:${s.code}`);socket.data.hostSession=s.code;socket.data.host=true;reply?.({session:publicSession(s),slide:s.status==='lobby'?null:slidePayload(s),leaderboard:board(s)})});
+
+  socket.on('participant:join',({code:sessionCode,name,employeeCode},reply)=>{
+    const s=sessions.get(sessionCode),displayName=cleanText(name,32),empCode=cleanText(employeeCode,32);
+    if(!s)return reply?.({error:'That code does not exist or the session has ended.'});
+    if(!displayName)return reply?.({error:'Enter your name to join.'});
+    if(!empCode)return reply?.({error:'Enter your employee code to join.'});
+    const duplicate=[...s.participants.values()].find(p=>p.employeeCode.toLowerCase()===empCode.toLowerCase());
+    if(duplicate)return reply?.({error:'That employee code is already in this quiz.'});
+    const p={id:crypto.randomUUID(),name:displayName,employeeCode:empCode,score:0,joinedAt:Date.now(),connected:true};
+    s.participants.set(p.id,p);
+    socket.join(`session:${s.code}`);socket.data.sessionCode=s.code;socket.data.participantId=p.id;
+    emitStats(s);
+    reply?.({participant:p,session:publicSession(s),slide:s.status==='lobby'?null:slidePayload(s),leaderboard:board(s,p.id)});
+    io.to(`session:${s.code}`).emit('lobby:update',publicSession(s));
+  });
+
+  socket.on('participant:observe',({code:sessionCode},reply)=>{const s=sessions.get(sessionCode);if(!s)return reply?.({error:'Session not found.'});socket.join(`session:${s.code}`);socket.data.sessionCode=s.code;socket.data.observer=true;reply?.({session:publicSession(s),slide:s.status==='lobby'?null:slidePayload(s),leaderboard:board(s)})});
+  socket.on('participant:rejoin',({code:sessionCode,participantId},reply)=>{const s=sessions.get(sessionCode),p=s?.participants.get(participantId);if(!s||!p)return reply?.({error:'Participant session not found.'});p.connected=true;socket.join(`session:${s.code}`);socket.data.sessionCode=s.code;socket.data.participantId=p.id;reply?.({participant:p,session:publicSession(s),slide:s.status==='lobby'?null:slidePayload(s),leaderboard:board(s,p.id),review:participantReview(s,p.id)})});
+  socket.on('host:start',reply=>{const s=sessions.get(socket.data.hostSession);if(!s||!socket.data.host)return;openSlide(s);reply?.({ok:true})});
+  socket.on('host:close',reply=>{const s=sessions.get(socket.data.hostSession);if(!s||!socket.data.host||s.status!=='slide')return;closeSlide(s);reply?.({ok:true})});
+  socket.on('host:next',reply=>{const s=sessions.get(socket.data.hostSession);if(!s||!socket.data.host)return;if(s.status==='slide')closeSlide(s);if(s.slideIndex+1>=s.slides.length){clearTimer(s);s.status='complete';io.to(`session:${s.code}`).emit('session:complete',{leaderboard:board(s),reviewers:[...s.participants.values()].map(p=>({id:p.id,name:p.name,employeeCode:p.employeeCode,score:p.score,review:participantReview(s,p.id)}))});emitStats(s)}else{s.slideIndex++;openSlide(s)}reply?.({ok:true})});
+
+  socket.on('participant:answer',({optionId},reply)=>{
+    const s=sessions.get(socket.data.sessionCode),p=s?.participants.get(socket.data.participantId),slide=s&&activeSlide(s);
+    if(!s||!p||s.status!=='slide'||!slide||!ANSWER_TYPES.includes(slide.type))return reply?.({error:'Responses are not open.'});
+    if(s.answers.has(p.id)||!(slide.options||[]).some(o=>o.id===String(optionId)))return reply?.({error:'Answer already recorded.'});
+    const now=Date.now();
+    if(slide.duration>0&&now>s.slideStartedAt+slide.duration*1000)return reply?.({error:'Time is up. Your score for this question is 0.'});
+    const correct=(slide.type==='quiz'||slide.type==='truefalse')&&slide.correctOptionId===String(optionId);
+    const earned=correct?scoreFor(s,now):0;
+    if(correct)p.score+=earned;
+    s.answers.set(p.id,{optionId:String(optionId),at:now,isCorrect:correct,earnedPoints:earned});
+    s.history.push({participantId:p.id,slideIndex:s.slideIndex,title:slide.title,type:slide.type,options:slide.options||[],selectedOptionId:String(optionId),correctOptionId:slide.correctOptionId??null,isCorrect:correct,earnedPoints:earned});
+    io.to(`session:${s.code}`).emit('slide:progress',{totalAnswers:s.answers.size,leaderboard:board(s)});
+    reply?.({ok:true,isCorrect:correct,earnedPoints:earned,score:p.score,correctOptionId:slide.correctOptionId??null,review:participantReview(s,p.id),leaderboard:board(s,p.id)});
+  });
+
+  socket.on('disconnect',()=>{const s=sessions.get(socket.data.sessionCode),p=s?.participants.get(socket.data.participantId);if(s&&p){p.connected=false;emitStats(s)}})
+});
+
 server.listen(process.env.PORT||3000,()=>console.log('Pulse is ready at http://localhost:3000'));
