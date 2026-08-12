@@ -1,14 +1,10 @@
 // Pulse live-session reliability layer.
-// This intentionally sits beside app.js so the core editor/presentation flow stays untouched.
+// Runs beside app.js so the core editor/presentation flow stays untouched.
 (() => {
   const socket = io();
-  let auxJoined = false;
   let timerInterval = null;
-
   const $ = (s) => document.querySelector(s);
   const esc = (v) => String(v ?? '').replace(/[&<>\"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#39;'}[c]));
-
-  const isHost = () => new URLSearchParams(location.search).has('host');
   const isParticipant = () => !!$('.participant-page');
 
   const ensureStyles = () => {
@@ -77,27 +73,23 @@
       const page = $('.participant-page');
       (page || document.body).appendChild(wrap);
     }
-    const rows = (board.top || []).map((p, i) => `<div class="pulse-live-board-row ${board.participantRank===p.rank?'me':''}"><span class="pulse-live-board-rank">${p.rank}</span><span class="pulse-live-board-name">${esc(p.name)}</span><span class="pulse-live-board-score">${p.score}</span></div>`).join('');
+    const rows = (board.top || []).map(p => `<div class="pulse-live-board-row ${board.participantRank===p.rank?'me':''}"><span class="pulse-live-board-rank">${p.rank}</span><span class="pulse-live-board-name">${esc(p.name)}</span><span class="pulse-live-board-score">${p.score}</span></div>`).join('');
     wrap.innerHTML = `<h3>🏆 Live leaderboard</h3>${rows || '<div class="hint">No scores yet.</div>'}${board.participantRank?`<div class="hint" style="margin-top:12px">Your rank: <b>#${board.participantRank}</b> · ${board.participantScore ?? 0} points</div>`:''}`;
   };
 
-  const joinAuxSession = () => {
+  const joinObserver = () => {
     const params = new URLSearchParams(location.search);
     const hostCode = params.get('host');
     const hostToken = params.get('token');
     if (hostCode && hostToken) {
-      socket.emit('host:join', {code:hostCode, token:hostToken}, () => { auxJoined = true; });
+      socket.emit('host:join', {code:hostCode, token:hostToken});
       return;
     }
     const saved = JSON.parse(sessionStorage.getItem('pulseParticipant') || 'null');
-    if (saved?.code) {
-      socket.emit('participant:join', {code:saved.code, name:saved.name || 'Participant'}, (r) => {
-        if (!r?.error) auxJoined = true;
-      });
-    }
+    if (saved?.code) socket.emit('participant:observe', {code:saved.code});
   };
 
-  // Capture participant join details without interfering with app.js.
+  // Capture participant join details without creating a second participant.
   document.addEventListener('click', (e) => {
     const btn = e.target.closest('#joinBtn');
     if (!btn) return;
@@ -106,32 +98,26 @@
       const name = $('#name')?.value?.trim();
       if (code && name) {
         sessionStorage.setItem('pulseParticipant', JSON.stringify({code, name}));
-        socket.emit('participant:join', {code, name}, (r) => { if (!r?.error) auxJoined = true; });
+        socket.emit('participant:observe', {code});
       }
     }, 150);
   }, true);
 
   socket.on('slide:open', slide => {
     startVisibleTimer(slide);
-    // A new question starts with a clean leaderboard area; results will repopulate it.
     if (isParticipant()) $('.pulse-live-board')?.remove();
   });
-
   socket.on('slide:results', payload => {
     removeTimer();
     if (isParticipant()) renderLeaderboard(payload?.leaderboard);
   });
-
   socket.on('session:complete', payload => {
     removeTimer();
     if (isParticipant()) renderLeaderboard(payload?.leaderboard);
   });
-
-  socket.on('lobby:update', () => {});
-  socket.on('connect', joinAuxSession);
+  socket.on('connect', joinObserver);
 
   ensureStyles();
-  // In case app.js renders the live screen before this script connects.
   new MutationObserver(() => {
     if (isParticipant()) {
       document.querySelectorAll('.participant-options button').forEach(b => {
