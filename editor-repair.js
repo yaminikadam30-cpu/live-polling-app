@@ -53,9 +53,6 @@
 
   migratePresentations();
 
-  // Keep the application's single Socket.IO connection, but expose it to this
-  // repair layer so live presentation UI can react without creating a second
-  // connection for every participant.
   const originalIo = window.io;
   if (typeof originalIo === 'function') {
     const wrappedIo = function (...args) {
@@ -178,10 +175,12 @@
     let board = target.querySelector('.pulse-live-board');
     if (!board) {
       target.insertAdjacentHTML('beforeend', leaderboardHtml());
-      board = target.querySelector('.pulse-live-board');
-    } else {
-      board.outerHTML = leaderboardHtml();
+      return;
     }
+
+    const rows = board.querySelector('.pulse-board-rows');
+    const nextRows = boardRows();
+    if (rows && rows.innerHTML !== nextRows) rows.innerHTML = nextRows;
   }
 
   function renderDedicatedLeaderboard() {
@@ -190,16 +189,22 @@
     const target = host || participant;
     if (!target) return;
 
-    const title = liveState.slide?.title || 'Leaderboard';
-    target.innerHTML = `<div class="pulse-dedicated-board">
-      <div class="eyebrow">LEADERBOARD</div>
-      <h1>🏆 ${esc(title)}</h1>
-      ${leaderboardHtml()}
-    </div>`;
+    let dedicated = target.querySelector('.pulse-dedicated-board');
+    if (!dedicated) {
+      target.innerHTML = `<div class="pulse-dedicated-board">
+        <div class="eyebrow">LEADERBOARD</div>
+        <h1>🏆 ${esc(liveState.slide?.title || 'Leaderboard')}</h1>
+        ${leaderboardHtml()}
+      </div>`;
+    } else {
+      const rows = dedicated.querySelector('.pulse-board-rows');
+      const nextRows = boardRows();
+      if (rows && rows.innerHTML !== nextRows) rows.innerHTML = nextRows;
+    }
 
     if (host) {
       const controls = document.querySelector('.present-controls');
-      if (controls) {
+      if (controls && !document.querySelector('#pulseLeaderboardNext')) {
         controls.innerHTML = '<button class="primary" id="pulseLeaderboardNext">Next</button>';
         document.querySelector('#pulseLeaderboardNext')?.addEventListener('click', () => {
           window.PulseLiveSocket?.emit('host:next');
@@ -208,8 +213,5 @@
     }
   }
 
-  // Refresh the leaderboard immediately whenever the server sends progress.
-  // This is intentionally event-driven: 250–300 participants do NOT create
-  // hundreds of polling requests.
   window.PulseEditorRepair = { migratePresentations, installLiveQuizRepair };
 })();
