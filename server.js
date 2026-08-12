@@ -48,7 +48,7 @@ app.post('/api/sessions',(req,res)=>{
 
 app.get('/api/sessions/:code',(req,res)=>{const s=sessions.get(req.params.code);if(!s)return res.status(404).json({error:'Session not found.'});res.json(publicSession(s))});
 
-aio.on('connection',socket=>{
+io.on('connection',socket=>{
   socket.on('host:join',({code:sessionCode,token},reply)=>{const s=sessions.get(sessionCode);if(!s||token!==s.hostToken)return reply?.({error:'Host access denied.'});socket.join(`session:${s.code}`);socket.data.hostSession=s.code;socket.data.host=true;reply?.({session:publicSession(s),slide:s.status==='lobby'?null:slidePayload(s),leaderboard:board(s)})});
 
   socket.on('participant:join',({code:sessionCode,name,employeeCode},reply)=>{
