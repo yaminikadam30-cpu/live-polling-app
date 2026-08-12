@@ -52,5 +52,164 @@
   }
 
   migratePresentations();
-  window.PulseEditorRepair = { migratePresentations };
+
+  // Keep the application's single Socket.IO connection, but expose it to this
+  // repair layer so live presentation UI can react without creating a second
+  // connection for every participant.
+  const originalIo = window.io;
+  if (typeof originalIo === 'function') {
+    const wrappedIo = function (...args) {
+      const sock = originalIo.apply(this, args);
+      window.PulseLiveSocket = sock;
+      installLiveQuizRepair(sock);
+      return sock;
+    };
+    Object.keys(originalIo).forEach(k => { try { wrappedIo[k] = originalIo[k]; } catch (_) {} });
+    window.io = wrappedIo;
+  }
+
+  let liveState = { slide: null, leaderboard: null };
+  let timerHandle = null;
+  let observerInstalled = false;
+
+  const esc = v => String(v ?? '').replace(/[&<>'\"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','\"':'&quot;'}[c]));
+
+  function installLiveQuizRepair(sock) {
+    if (!sock || sock.__pulseRepairInstalled) return;
+    sock.__pulseRepairInstalled = true;
+
+    sock.on('slide:open', slide => {
+      liveState.slide = slide || null;
+      liveState.leaderboard = slide?.leaderboard || liveState.leaderboard;
+      scheduleRepair();
+    });
+
+    sock.on('slide:progress', data => {
+      liveState.leaderboard = data?.leaderboard || liveState.leaderboard;
+      scheduleRepair();
+    });
+
+    sock.on('slide:results', data => {
+      liveState.slide = data?.slide || liveState.slide;
+      liveState.leaderboard = data?.leaderboard || liveState.leaderboard;
+      scheduleRepair();
+    });
+
+    sock.on('session:complete', data => {
+      liveState.leaderboard = data?.leaderboard || liveState.leaderboard;
+      stopRepairTimer();
+      scheduleRepair();
+    });
+
+    if (!observerInstalled) {
+      observerInstalled = true;
+      const observer = new MutationObserver(scheduleRepair);
+      observer.observe(document.documentElement, { childList: true, subtree: true });
+    }
+  }
+
+  function scheduleRepair() {
+    clearTimeout(scheduleRepair._t);
+    scheduleRepair._t = setTimeout(repairLiveUI, 0);
+  }
+
+  function isAnswerSlide(slide) {
+    return ['quiz', 'truefalse', 'poll'].includes(slide?.type);
+  }
+
+  function repairLiveUI() {
+    const slide = liveState.slide;
+    if (!slide) return;
+
+    if (isAnswerSlide(slide) && document.querySelector('.host-timer, .participant-timer')) {
+      const duration = Math.max(1, Number(slide.duration) || 30);
+      startRepairTimer(Number(slide.startedAt) || Date.now(), duration);
+      ensureLiveLeaderboard();
+    } else if (slide.type === 'leaderboard') {
+      stopRepairTimer();
+      renderDedicatedLeaderboard();
+    }
+  }
+
+  function startRepairTimer(startedAt, duration) {
+    if (timerHandle?.startedAt === startedAt && timerHandle?.duration === duration) return;
+    stopRepairTimer();
+    const tick = () => {
+      const left = Math.max(0, duration * 1000 - (Date.now() - startedAt));
+      const text = Math.ceil(left / 1000) + 's';
+      document.querySelectorAll('.host-timer, .participant-timer').forEach(el => {
+        el.textContent = text;
+        el.classList.toggle('timer-critical', left <= 5000);
+      });
+      if (left > 0) timerHandle.raf = requestAnimationFrame(tick);
+    };
+    timerHandle = { startedAt, duration, raf: 0 };
+    tick();
+  }
+
+  function stopRepairTimer() {
+    if (timerHandle?.raf) cancelAnimationFrame(timerHandle.raf);
+    timerHandle = null;
+  }
+
+  function boardRows() {
+    const top = liveState.leaderboard?.top || [];
+    if (!top.length) return '<div class="pulse-board-empty">No scores yet — scores will appear as people answer.</div>';
+    return top.slice(0, 10).map(p => `
+      <div class="pulse-board-row">
+        <span><b>#${Number(p.rank) || ''}</b> ${esc(p.name)}</span>
+        <strong>${Number(p.score || 0).toLocaleString()}</strong>
+      </div>`).join('');
+  }
+
+  function leaderboardHtml() {
+    return `<div class="pulse-live-board">
+      <div class="pulse-board-heading"><span>🏆 Live leaderboard</span><small>TOP 10</small></div>
+      <div class="pulse-board-rows">${boardRows()}</div>
+    </div>`;
+  }
+
+  function ensureLiveLeaderboard() {
+    const host = document.querySelector('.host-question');
+    const participant = document.querySelector('.participant-question');
+    const target = host || participant;
+    if (!target) return;
+
+    let board = target.querySelector('.pulse-live-board');
+    if (!board) {
+      target.insertAdjacentHTML('beforeend', leaderboardHtml());
+      board = target.querySelector('.pulse-live-board');
+    } else {
+      board.outerHTML = leaderboardHtml();
+    }
+  }
+
+  function renderDedicatedLeaderboard() {
+    const host = document.querySelector('.host-question');
+    const participant = document.querySelector('.participant-question');
+    const target = host || participant;
+    if (!target) return;
+
+    const title = liveState.slide?.title || 'Leaderboard';
+    target.innerHTML = `<div class="pulse-dedicated-board">
+      <div class="eyebrow">LEADERBOARD</div>
+      <h1>🏆 ${esc(title)}</h1>
+      ${leaderboardHtml()}
+    </div>`;
+
+    if (host) {
+      const controls = document.querySelector('.present-controls');
+      if (controls) {
+        controls.innerHTML = '<button class="primary" id="pulseLeaderboardNext">Next</button>';
+        document.querySelector('#pulseLeaderboardNext')?.addEventListener('click', () => {
+          window.PulseLiveSocket?.emit('host:next');
+        });
+      }
+    }
+  }
+
+  // Refresh the leaderboard immediately whenever the server sends progress.
+  // This is intentionally event-driven: 250–300 participants do NOT create
+  // hundreds of polling requests.
+  window.PulseEditorRepair = { migratePresentations, installLiveQuizRepair };
 })();
