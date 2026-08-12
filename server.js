@@ -33,7 +33,8 @@ app.post('/api/sessions',(req,res)=>{
   const slides=Array.isArray(req.body.slides)?req.body.slides.map(raw=>{
     const type=TYPES.includes(raw.type)?raw.type:'content';
     const rawDuration=Number(raw.duration);
-    const slide={id:raw.id||crypto.randomUUID(),type,title:cleanText(raw.title,300),body:cleanText(raw.body,3000),image:cleanText(raw.image,250000),font:cleanText(raw.font,60)||'Inter',fontSize:Number(raw.fontSize)||44,duration:Math.max(0,Math.min(600,rawDuration===0?0:rawDuration||DEFAULT_DURATION)),options:Array.isArray(raw.options)?raw.options.slice(0,10).map((o,i)=>({id:String(i),text:cleanText(o.text,180),image:cleanText(o.image,250000)})).filter(o=>o.text):[]};
+    const effectiveDuration=rawDuration>0?rawDuration:((type==='quiz'||type==='truefalse')?DEFAULT_DURATION:0);
+    const slide={id:raw.id||crypto.randomUUID(),type,title:cleanText(raw.title,300),body:cleanText(raw.body,3000),image:cleanText(raw.image,250000),font:cleanText(raw.font,60)||'Inter',fontSize:Number(raw.fontSize)||44,duration:Math.max(0,Math.min(600,effectiveDuration)),options:Array.isArray(raw.options)?raw.options.slice(0,10).map((o,i)=>({id:String(i),text:cleanText(o.text,180),image:cleanText(o.image,250000)})).filter(o=>o.text):[]};
     if(type==='truefalse'&&slide.options.length===0)slide.options=[{id:'0',text:'True',image:''},{id:'1',text:'False',image:''}];
     if(type==='quiz'||type==='truefalse'){const correct=Number(raw.correctOptionIndex);slide.correctOptionId=Number.isInteger(correct)&&correct>=0&&correct<slide.options.length?String(correct):null}
     return slide;
