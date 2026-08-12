@@ -1,0 +1,31 @@
+/* Editor safety net: never let a layout layer make authoring controls inert. */
+.editor-body .edit-panel,
+.editor-body .edit-panel * {
+  pointer-events: auto !important;
+}
+.editor-body .edit-panel input,
+.editor-body .edit-panel textarea,
+.editor-body .edit-panel select {
+  user-select: text !important;
+  -webkit-user-select: text !important;
+  cursor: text !important;
+  opacity: 1 !important;
+}
+.editor-body .edit-panel button,
+.editor-body .slide-item,
+.editor-body .slide-item * {
+  pointer-events: auto !important;
+}
+.presentation-canvas .canvas-title[data-pulse-editable="true"],
+.presentation-canvas .canvas-body[data-pulse-editable="true"] {
+  cursor: text !important;
+  outline: 1px dashed transparent;
+  border-radius: 6px;
+}
+.presentation-canvas .canvas-title[data-pulse-editable="true"]:hover,
+.presentation-canvas .canvas-title[data-pulse-editable="true"]:focus,
+.presentation-canvas .canvas-body[data-pulse-editable="true"]:hover,
+.presentation-canvas .canvas-body[data-pulse-editable="true"]:focus {
+  outline-color: #635bff;
+  background: #faf9ff;
+}
