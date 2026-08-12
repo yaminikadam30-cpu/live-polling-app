@@ -108,10 +108,11 @@ app.post('/api/sessions', (req, res) => {
   if (!questions.length) return res.status(400).json({ error: 'Add at least one question with two options.' });
   const session = {
     code: code(), title, questions, status: 'lobby', questionIndex: -1,
-    participants: new Map(), answers: new Map(), createdAt: Date.now(), timer: null, questionStartedAt: null
+    participants: new Map(), answers: new Map(), createdAt: Date.now(), timer: null,
+    questionStartedAt: null, hostToken: crypto.randomUUID()
   };
   sessions.set(session.code, session);
-  res.status(201).json({ ...publicSession(session), hostToken: crypto.randomUUID() });
+  res.status(201).json({ ...publicSession(session), hostToken: session.hostToken });
 });
 
 app.get('/api/sessions/:code', (req, res) => {
@@ -121,9 +122,10 @@ app.get('/api/sessions/:code', (req, res) => {
 });
 
 io.on('connection', (socket) => {
-  socket.on('host:join', ({ code: sessionCode }, reply) => {
+  socket.on('host:join', ({ code: sessionCode, hostToken }, reply) => {
     const session = sessions.get(sessionCode);
     if (!session) return reply?.({ error: 'Session not found.' });
+    if (!hostToken || hostToken !== session.hostToken) return reply?.({ error: 'Invalid host access link.' });
     socket.join(`session:${session.code}`);
     socket.data.hostSession = session.code;
     reply?.({ session: publicSession(session), question: questionPayload(session), leaderboard: leaderboard(session) });
